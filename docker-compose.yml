@@ -1,0 +1,13 @@
+services:
+  game:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - db_data:/app/data
+    environment:
+      - DB_PATH=/app/data/game.db
+    restart: unless-stopped
+
+volumes:
+  db_data:

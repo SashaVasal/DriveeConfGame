@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -13,8 +14,12 @@ import (
 var db *sql.DB
 
 func initDB() {
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "./game.db"
+	}
 	var err error
-	db, err = sql.Open("sqlite", "./game.db")
+	db, err = sql.Open("sqlite", dbPath)
 	if err != nil {
 		log.Fatal(err)
 	}
