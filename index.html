@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Drivee Game</title>
+  <script src="https://cdn.jsdelivr.net/npm/pixi.js@8/dist/pixi.min.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #1a1a1a;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    #game-container {
+      position: relative;
+      display: block;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    /* ── Overlays ── */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.82);
+      z-index: 10;
+    }
+
+    .overlay-box {
+      background: #1e1e1e;
+      border: 2px solid #444;
+      border-radius: 16px;
+      padding: 36px 40px;
+      text-align: center;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      min-width: 300px;
+    }
+
+    .overlay-box h1 {
+      font-size: 2.4rem;
+      color: #ff4444;
+      margin-bottom: 8px;
+      letter-spacing: 2px;
+    }
+
+    .overlay-box h2 {
+      font-size: 1.8rem;
+      color: #ff4444;
+      margin-bottom: 4px;
+    }
+
+    .overlay-box h3 {
+      font-size: 1rem;
+      color: #aaa;
+      margin: 16px 0 8px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .overlay-box p {
+      color: #ccc;
+      margin-bottom: 20px;
+      font-size: 0.95rem;
+    }
+
+    #my-score-text {
+      font-size: 1.5rem;
+      color: #fff;
+      margin: 8px 0 16px;
+    }
+
+    .overlay-box input[type="text"] {
+      width: 100%;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid #555;
+      background: #2a2a2a;
+      color: #fff;
+      font-size: 1rem;
+      outline: none;
+      margin-bottom: 16px;
+    }
+
+    .overlay-box input[type="text"]:focus {
+      border-color: #ff4444;
+    }
+
+    .overlay-btn {
+      width: 100%;
+      padding: 12px;
+      border-radius: 8px;
+      border: none;
+      background: #ff4444;
+      color: #fff;
+      font-size: 1rem;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .overlay-btn:hover { background: #e03333; }
+    .overlay-btn:disabled { background: #666; cursor: default; }
+
+    #lb-list {
+      list-style: none;
+      padding: 0;
+      margin: 0 0 20px;
+      text-align: left;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+
+    #lb-list li {
+      padding: 6px 10px;
+      border-radius: 6px;
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.95rem;
+      color: #ddd;
+    }
+
+    #lb-list li:nth-child(odd) { background: #2a2a2a; }
+    #lb-list li.me { color: #ffdd44; font-weight: bold; }
+    #lb-list li .rank { color: #888; margin-right: 8px; }
+  </style>
+</head>
+<body>
+  <!-- Registration overlay -->
+  <div id="reg-overlay" class="overlay">
+    <div class="overlay-box">
+      <h1>DRIVEE</h1>
+      <p>Введите своё имя для начала игры</p>
+      <input type="text" id="player-name" placeholder="Ваше имя" maxlength="50" autocomplete="off" />
+      <button id="start-btn" class="overlay-btn">Начать игру</button>
+    </div>
+  </div>
+
+  <!-- Leaderboard overlay (shown on game over) -->
+  <div id="lb-overlay" class="overlay" style="display:none">
+    <div class="overlay-box">
+      <h2>Game Over</h2>
+      <div id="my-score-text"></div>
+      <h3>Таблица лидеров</h3>
+      <ol id="lb-list"></ol>
+      <button id="restart-btn" class="overlay-btn">Играть снова</button>
+    </div>
+  </div>
+
+  <div id="game-container"></div>
+
+  <script>
+    const SPRITE_PLAYER  = '/sprites/car-player.png';
+    const SPRITE_ENEMY   = '/sprites/car-enemy.png';
+    const SPRITE_FRIENDLY = '/sprites/car-friendly.png';
+    const SPRITE_CROSS   = '/sprites/car-cross.png';
+    const SPRITE_ENV_TREE = '/sprites/tree-2.png';
+    const SPRITE_ENV_BUSH = '/sprites/bush.png';
+    const SPRITE_ENV_ROCK = '/sprites/rock.png';
+    const GAME_WIDTH  = 360;
+    const GAME_HEIGHT = 600;
+
+    const LANE_COUNT       = 4;
+    const ROAD_MARGIN      = 30;
+    const LANE_WIDTH       = (GAME_WIDTH - ROAD_MARGIN * 2) / LANE_COUNT;  // 75px
+    const OBJ_W            = 40;
+    const OBJ_H            = 60;
+    const PLAYER_Y_OFFSET  = 200;   // отступ от низа
+
+    function laneCenterX(lane) {
+      return ROAD_MARGIN + LANE_WIDTH * lane + LANE_WIDTH / 2;
+    }
+
+    // ── API helpers ───────────────────────────────────────────────────────────
+    let currentPlayer = null;
+
+    async function apiRegister(name) {
+      const res = await fetch('/api/players', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      return res.json();
+    }
+
+    async function apiSaveScore(playerId, score) {
+      await fetch('/api/scores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ player_id: playerId, score }),
+      });
+    }
+
+    async function apiFetchLeaderboard() {
+      const res = await fetch('/api/leaderboard');
+      return res.json();
+    }
+
+    // ── Registration form ─────────────────────────────────────────────────────
+    async function startWithPlayer(player) {
+      currentPlayer = player;
+      localStorage.setItem('drivee_player', JSON.stringify(player));
+      document.getElementById('reg-overlay').style.display = 'none';
+      initGame();
+    }
+
+    document.getElementById('start-btn').addEventListener('click', async () => {
+      const name = document.getElementById('player-name').value.trim();
+      if (!name) return;
+      const btn = document.getElementById('start-btn');
+      btn.disabled = true;
+      btn.textContent = '...';
+      const player = await apiRegister(name);
+      startWithPlayer(player);
+    });
+
+    document.getElementById('player-name').addEventListener('keydown', e => {
+      if (e.key === 'Enter') document.getElementById('start-btn').click();
+    });
+
+    document.getElementById('restart-btn').addEventListener('click', () => {
+      location.reload();
+    });
+
+    // Auto-login if name was saved before
+    const saved = localStorage.getItem('drivee_player');
+    if (saved) {
+      startWithPlayer(JSON.parse(saved));
+    }
+
+    // ── Game ──────────────────────────────────────────────────────────────────
+    async function initGame() {
+      const app = new PIXI.Application();
+
+      await app.init({
+        width: GAME_WIDTH,
+        height: GAME_HEIGHT,
+        backgroundColor: 0x444444,
+        antialias: true,
+        resolution: window.devicePixelRatio || 1,
+        autoDensity: true,
+      });
+
+      document.getElementById('game-container').appendChild(app.canvas);
+
+      // ── Загрузка спрайтов ─────────────────────────────────────────────────────
+      await PIXI.Assets.load([
+        { alias: 'car-player',   src: SPRITE_PLAYER },
+        { alias: 'car-enemy',    src: SPRITE_ENEMY },
+        { alias: 'car-friendly', src: SPRITE_FRIENDLY },
+        { alias: 'car-cross',    src: SPRITE_CROSS },
+        { alias: 'env-tree',     src: SPRITE_ENV_TREE },
+        { alias: 'env-bush',     src: SPRITE_ENV_BUSH },
+        { alias: 'env-rock',     src: SPRITE_ENV_ROCK },
+      ]);
+
+      function makeCarSprite(alias, w, h, rotation = 0) {
+        const sprite = new PIXI.Sprite(PIXI.Assets.get(alias));
+        sprite.anchor.set(0.5);
+        sprite.width    = w;
+        sprite.height   = h;
+        sprite.rotation = rotation;
+        return sprite;
+      }
+
+      // ── Масштабирование ──────────────────────────────────────────────────────
+      function resize() {
+        const scale = Math.min(window.innerWidth / GAME_WIDTH, window.innerHeight / GAME_HEIGHT);
+        const w = Math.floor(GAME_WIDTH  * scale);
+        const h = Math.floor(GAME_HEIGHT * scale);
+        app.canvas.style.width  = w + 'px';
+        app.canvas.style.height = h + 'px';
+        const wrap = document.getElementById('game-container');
+        wrap.style.width  = w + 'px';
+        wrap.style.height = h + 'px';
+      }
+      resize();
+      window.addEventListener('resize', resize);
+
+      // ── Слои ─────────────────────────────────────────────────────────────────
+      const roadLayer         = new PIXI.Container();
+      const decorLayer        = new PIXI.Container(); // декорации обочины
+      const verticalLayer     = new PIXI.Container(); // вертикальные машины (под перекрёстком)
+      const intersectionLayer = new PIXI.Container(); // перекрёстки + горизонтальные машины
+      const playerLayer       = new PIXI.Container();
+      const uiLayer           = new PIXI.Container();
+
+      app.stage.addChild(roadLayer, decorLayer, verticalLayer, intersectionLayer, playerLayer, uiLayer);
+
+      // ── Дорога ───────────────────────────────────────────────────────────────
+      const road = new PIXI.Graphics();
+      // трава по бокам
+      road.rect(0, 0, GAME_WIDTH, GAME_HEIGHT).fill(0x2d7a2d);
+      // тёмно-серое дорожное покрытие
+      road.rect(ROAD_MARGIN, 0, GAME_WIDTH - ROAD_MARGIN * 2, GAME_HEIGHT).fill(0x333333);
+      // разметка полос
+      for (let i = 1; i < LANE_COUNT; i++) {
+        const x = ROAD_MARGIN + LANE_WIDTH * i;
+        road
+          .setStrokeStyle({ width: 2, color: 0xffffff, alpha: 0.25 })
+          .moveTo(x, 0)
+          .lineTo(x, GAME_HEIGHT)
+          .stroke();
+      }
+      // бордюры дороги
+      road
+        .setStrokeStyle({ width: 4, color: 0xffffff, alpha: 0.6 })
+        .moveTo(ROAD_MARGIN, 0).lineTo(ROAD_MARGIN, GAME_HEIGHT).stroke()
+        .moveTo(GAME_WIDTH - ROAD_MARGIN, 0).lineTo(GAME_WIDTH - ROAD_MARGIN, GAME_HEIGHT).stroke();
+      roadLayer.addChild(road);
+
+      // ── Декорации обочины ────────────────────────────────────────────────────
+      const decorations = [];
+      const DECOR_ALIASES = ['env-tree', 'env-bush', 'env-rock'];
+      const DECOR_SIZE    = 24;
+
+      function spawnDecoration() {
+        const alias  = DECOR_ALIASES[Math.floor(Math.random() * DECOR_ALIASES.length)];
+        const sprite = new PIXI.Sprite(PIXI.Assets.get(alias));
+        sprite.anchor.set(0.5);
+        sprite.width  = DECOR_SIZE;
+        sprite.height = DECOR_SIZE;
+        sprite.x = Math.random() < 0.5 ? ROAD_MARGIN / 2 : GAME_WIDTH - ROAD_MARGIN / 2;
+        sprite.y = -DECOR_SIZE / 2;
+        decorLayer.addChild(sprite);
+        decorations.push(sprite);
+      }
+
+      // предзаполняем обочину
+      for (let i = 0; i < 14; i++) {
+        spawnDecoration();
+        decorations[decorations.length - 1].y = Math.random() * GAME_HEIGHT;
+      }
+
+      setInterval(() => { spawnDecoration(); spawnDecoration(); }, 700);
+
+      // ── Игрок ─────────────────────────────────────────────────────────────────
+      let playerLane = 1;   // стартовая полоса (0-3)
+      const playerGfx = makeCarSprite('car-player', OBJ_W, OBJ_H);
+      playerGfx.x = laneCenterX(playerLane);
+      playerGfx.y = GAME_HEIGHT - PLAYER_Y_OFFSET;
+      playerLayer.addChild(playerGfx);
+
+      // ── Сложность ─────────────────────────────────────────────────────────────
+      const difficulty = {
+        speed:         3,     // множитель скорости (px/s = 100 * speed)
+        spawnInterval: 2000,  // мс между спавнами
+        carsPerWave:   1,     // машин за одну волну
+      };
+
+      const SPEED_STEP          = 0.5;   // +speed каждые 10 очков
+      const SPAWN_STEP          = 200;   // -мс каждые 15 очков
+      const SPAWN_INTERVAL_MIN  = 500;   // нижний предел интервала
+      const CARS_STEP_SCORE     = 20;    // каждые N очков +1 машина в волне
+      const CARS_MAX            = 3;     // максимум машин за волну
+
+      const INTERSECTION_TRIGGER = 5;  // каждые N очков — перекрёсток
+      const INTERSECTION_H       = 90;  // высота полосы перекрёстка
+      const H_CAR_W              = 62;  // ширина горизонтальной машины
+      const H_CAR_H              = 34;  // высота горизонтальной машины
+      const H_CAR_SPEED          = 320; // px/s по горизонтали
+      const H_CAR_COUNT          = 1;   // машин в каждом ряду
+
+      // ── Счёт ──────────────────────────────────────────────────────────────────
+      let score = 0;
+      const scoreText = new PIXI.Text({
+        text: 'Счёт: 0',
+        style: new PIXI.TextStyle({
+          fontFamily: 'Arial',
+          fontSize: 24,
+          fontWeight: 'bold',
+          fill: 0xffffff,
+          stroke: { color: 0x000000, width: 4 },
+        }),
+      });
+      scoreText.x = 12;
+      scoreText.y = 12;
+      uiLayer.addChild(scoreText);
+
+      // ── Препятствия ───────────────────────────────────────────────────────────
+      const obstacles = [];
+
+      function createObstacleOnLane(lane) {
+        const baseSpeed = difficulty.speed * 100;
+        // индивидуальный множитель скорости: от 0.7× до 1.4× базовой
+        const speedMult = 0.7 + Math.random() * 0.7;
+        const speed     = baseSpeed * speedMult;
+
+        // встречные едут вниз → спрайт повёрнут на 180°
+        const gfx = makeCarSprite('car-enemy', OBJ_W, OBJ_H, Math.PI);
+        gfx.x = laneCenterX(lane);
+        gfx.y = -OBJ_H / 2;
+        gfx._speed = speed;
+        verticalLayer.addChild(gfx);
+        obstacles.push(gfx);
+      }
+
+      function laneOf(obj) {
+        return Math.round((obj.x - ROAD_MARGIN - LANE_WIDTH / 2) / LANE_WIDTH);
+      }
+
+      function spawnWave() {
+        // выбираем случайные уникальные полосы для волны,
+        // исключая полосы с активными попутками и встречными
+        const busyLanes = new Set([
+          ...tailgaters.map(laneOf),
+          ...obstacles.map(laneOf),
+        ]);
+        const count = difficulty.carsPerWave;
+        const lanes = Array.from({ length: LANE_COUNT }, (_, i) => i)
+          .filter(l => !busyLanes.has(l));
+        for (let i = lanes.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [lanes[i], lanes[j]] = [lanes[j], lanes[i]];
+        }
+        lanes.slice(0, count).forEach(createObstacleOnLane);
+      }
+
+      // ── Попутные машины (снизу вверх) ─────────────────────────────────────────
+      const tailgaters = [];
+
+      function createTailgater() {
+        // исключаем полосы с попутками и встречными
+        const occupiedLanes = new Set([
+          ...tailgaters.map(laneOf),
+          ...obstacles.map(laneOf),
+        ]);
+        const freeLanes = Array.from({ length: LANE_COUNT }, (_, i) => i)
+          .filter(l => !occupiedLanes.has(l));
+        if (freeLanes.length === 0) return;
+
+        const lane = freeLanes[Math.floor(Math.random() * freeLanes.length)];
+        const speed = difficulty.speed * 100 + 15 + Math.random() * 15;
+
+        // попутки едут вверх (как игрок) → спрайт без поворота
+        const gfx = makeCarSprite('car-friendly', OBJ_W, OBJ_H);
+        gfx.x = laneCenterX(lane);
+        gfx.y = GAME_HEIGHT + OBJ_H / 2;
+        gfx._speed = speed;
+        verticalLayer.addChild(gfx);
+        tailgaters.push(gfx);
+      }
+
+      let tailgaterIntervalId = null;
+
+      function restartTailgaterInterval() {
+        clearInterval(tailgaterIntervalId);
+        // попутки появляются чуть реже встречных
+        tailgaterIntervalId = setInterval(createTailgater, difficulty.spawnInterval * 1.5);
+      }
+
+      restartTailgaterInterval();
+
+      // ── Перекрёстки ───────────────────────────────────────────────────────────
+      const intersections = [];
+
+      function spawnIntersection() {
+        const inter = new PIXI.Container();
+        inter.x = 0;
+        inter.y = -INTERSECTION_H;
+        inter._scrollSpeed = difficulty.speed * 100;
+        inter._hcars = [];
+
+        // фон полосы перекрёстка
+        const bg = new PIXI.Graphics();
+        bg.rect(0, 0, GAME_WIDTH, INTERSECTION_H).fill(0x4a4a1a);
+        // жёлтые границы
+        bg.setStrokeStyle({ width: 3, color: 0xffee00, alpha: 0.9 })
+          .moveTo(0, 0).lineTo(GAME_WIDTH, 0).stroke()
+          .moveTo(0, INTERSECTION_H).lineTo(GAME_WIDTH, INTERSECTION_H).stroke();
+        // пунктирная центральная линия
+        for (let x = 4; x < GAME_WIDTH; x += 22) {
+          bg.rect(x, INTERSECTION_H / 2 - 2, 13, 4).fill({ color: 0xffee00, alpha: 0.4 });
+        }
+        inter.addChild(bg);
+
+        const row0y = Math.round(INTERSECTION_H * 0.28);  // → слева направо
+        const row1y = Math.round(INTERSECTION_H * 0.72);  // ← справа налево
+
+        for (let i = 0; i < H_CAR_COUNT; i++) {
+          // оранжевые → слева направо (поворот +90°)
+          const carR = makeCarSprite('car-enemy', H_CAR_H, H_CAR_W, Math.PI / 2);
+          carR.x = -(H_CAR_W / 2) - i * (H_CAR_W + 28);
+          carR.y = row0y;
+          carR._dir = 1;
+          inter.addChild(carR);
+          inter._hcars.push(carR);
+
+          // фиолетовые ← справа налево (поворот −90°)
+          const carL = makeCarSprite('car-cross', H_CAR_H, H_CAR_W, -Math.PI / 2);
+          carL.x = GAME_WIDTH + H_CAR_W / 2 + i * (H_CAR_W + 28);
+          carL.y = row1y;
+          carL._dir = -1;
+          inter.addChild(carL);
+          inter._hcars.push(carL);
+        }
+
+        intersectionLayer.addChild(inter);
+        intersections.push(inter);
+      }
+
+      // ── Спавн через setInterval (пересоздаётся при смене интервала) ───────────
+      let spawnIntervalId = null;
+
+      function restartSpawnInterval() {
+        clearInterval(spawnIntervalId);
+        spawnIntervalId = setInterval(spawnWave, difficulty.spawnInterval);
+        restartTailgaterInterval();
+      }
+
+      restartSpawnInterval();
+
+      // ── Управление: тап ───────────────────────────────────────────────────────
+      app.canvas.addEventListener('pointerdown', (e) => {
+        if (gameOver) return;
+        const rect   = app.canvas.getBoundingClientRect();
+        const scaleX = GAME_WIDTH / rect.width;
+        const tapX   = (e.clientX - rect.left) * scaleX;
+
+        if (tapX < GAME_WIDTH / 2) {
+          playerLane = Math.max(0, playerLane - 1);
+        } else {
+          playerLane = Math.min(LANE_COUNT - 1, playerLane + 1);
+        }
+      });
+
+      // ── Управление: клавиатура ─────────────────────────────────────────────────
+      window.addEventListener('keydown', (e) => {
+        if (gameOver) return;
+        if (e.key === 'ArrowLeft') {
+          playerLane = Math.max(0, playerLane - 1);
+        } else if (e.key === 'ArrowRight') {
+          playerLane = Math.min(LANE_COUNT - 1, playerLane + 1);
+        }
+      });
+
+      // ── AABB коллизия ─────────────────────────────────────────────────────────
+      function intersects(ax, ay, bx, by) {
+        return (
+          Math.abs(ax - bx) < OBJ_W &&
+          Math.abs(ay - by) < OBJ_H
+        );
+      }
+
+      // ── Game Over ─────────────────────────────────────────────────────────────
+      let gameOver = false;
+
+      function triggerGameOver() {
+        gameOver = true;
+        clearInterval(spawnIntervalId);
+        clearInterval(tailgaterIntervalId);
+        app.ticker.stop();
+        showGameOver();
+      }
+
+      async function showGameOver() {
+        // Save score and show HTML leaderboard overlay
+        if (currentPlayer) {
+          await apiSaveScore(currentPlayer.id, score);
+          const lb = await apiFetchLeaderboard();
+          document.getElementById('my-score-text').textContent = `Ваш счёт: ${score}`;
+          const list = document.getElementById('lb-list');
+          list.innerHTML = lb.map((r, i) => {
+            const isCurrent = r.name === currentPlayer.name;
+            return `<li class="${isCurrent ? 'me' : ''}">
+              <span><span class="rank">${i + 1}.</span>${r.name}</span>
+              <span>${r.best_score}</span>
+            </li>`;
+          }).join('');
+          document.getElementById('lb-overlay').style.display = 'flex';
+        }
+      }
+
+      // ── Игровой цикл ──────────────────────────────────────────────────────────
+      let playerX = laneCenterX(playerLane);
+
+      app.ticker.add((ticker) => {
+        const dt = ticker.deltaMS / 1000;  // дельта в секундах
+
+        // плавное движение игрока к целевой полосе
+        const targetX = laneCenterX(playerLane);
+        playerX += (targetX - playerX) * Math.min(1, dt * 12);
+        playerGfx.x = playerX;
+
+        // обновление декораций обочины
+        for (let i = decorations.length - 1; i >= 0; i--) {
+          const d = decorations[i];
+          d.y += difficulty.speed * 50 * dt;
+          if (d.y > GAME_HEIGHT + DECOR_SIZE / 2) {
+            decorLayer.removeChild(d);
+            d.destroy();
+            decorations.splice(i, 1);
+          }
+        }
+
+        // обновление перекрёстков
+        for (let i = intersections.length - 1; i >= 0; i--) {
+          const inter = intersections[i];
+          inter.y += inter._scrollSpeed * dt;
+
+          for (const car of inter._hcars) {
+            car.x += car._dir * H_CAR_SPEED * dt;
+          }
+
+          // коллизия горизонтальных машин с игроком
+          for (const car of inter._hcars) {
+            const worldY = inter.y + car.y;
+            if (
+              Math.abs(playerGfx.x - car.x) < (OBJ_W + H_CAR_W) / 2 &&
+              Math.abs(playerGfx.y - worldY) < (OBJ_H + H_CAR_H) / 2
+            ) {
+              triggerGameOver();
+              return;
+            }
+          }
+
+          if (inter.y > GAME_HEIGHT + INTERSECTION_H) {
+            intersectionLayer.removeChild(inter);
+            inter.destroy();
+            intersections.splice(i, 1);
+          }
+        }
+
+        // обновление попутных машин (движутся вверх)
+        for (let i = tailgaters.length - 1; i >= 0; i--) {
+          const t = tailgaters[i];
+          t.y -= t._speed * dt;
+
+          // стоп перед перекрёстком снизу
+          for (const inter of intersections) {
+            const interBottom = inter.y + INTERSECTION_H;
+            if (t.y - OBJ_H / 2 < interBottom && t.y + OBJ_H / 2 > inter.y) {
+              t.y = interBottom + OBJ_H / 2;
+            }
+          }
+
+          if (t.y < -OBJ_H / 2) {
+            verticalLayer.removeChild(t);
+            t.destroy();
+            tailgaters.splice(i, 1);
+            continue;
+          }
+
+          if (intersects(playerGfx.x, playerGfx.y, t.x, t.y)) {
+            triggerGameOver();
+            return;
+          }
+        }
+
+        // обновление препятствий
+        for (let i = obstacles.length - 1; i >= 0; i--) {
+          const obs = obstacles[i];
+          obs.y += obs._speed * dt;
+
+          // стоп перед перекрёстком сверху
+          for (const inter of intersections) {
+            if (obs.y + OBJ_H / 2 > inter.y && obs.y - OBJ_H / 2 < inter.y + INTERSECTION_H) {
+              obs.y = inter.y - OBJ_H / 2;
+            }
+          }
+
+          // препятствие покинуло экран → +1 очко
+          if (obs.y > GAME_HEIGHT + OBJ_H / 2) {
+            score++;
+            scoreText.text = `Счёт: ${score}`;
+
+            // каждые 10 очков — увеличиваем скорость
+            if (score % 10 === 0) {
+              difficulty.speed += SPEED_STEP;
+            }
+
+            // каждые 15 очков — уменьшаем интервал спавна
+            if (score % 15 === 0) {
+              const next = difficulty.spawnInterval - SPAWN_STEP;
+              difficulty.spawnInterval = Math.max(SPAWN_INTERVAL_MIN, next);
+              restartSpawnInterval();
+            }
+
+            // каждые 20 очков — добавляем машину в волну
+            if (score % CARS_STEP_SCORE === 0) {
+              difficulty.carsPerWave = Math.min(CARS_MAX, difficulty.carsPerWave + 1);
+            }
+
+            // каждые 25 очков — перекрёсток
+            if (score % INTERSECTION_TRIGGER === 0) {
+              spawnIntersection();
+            }
+
+            verticalLayer.removeChild(obs);
+            obs.destroy();
+            obstacles.splice(i, 1);
+            continue;
+          }
+
+          // проверка столкновения с игроком
+          if (intersects(playerGfx.x, playerGfx.y, obs.x, obs.y)) {
+            triggerGameOver();
+            return;
+          }
+        }
+      });
+
+    }
+  </script>
+</body>
+</html>
