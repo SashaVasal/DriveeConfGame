@@ -139,6 +139,90 @@
     #lb-list li:nth-child(odd) { background: #2a2a2a; }
     #lb-list li.me { color: #ffdd44; font-weight: bold; }
     #lb-list li .rank { color: #888; margin-right: 8px; }
+
+    /* ── Onboarding ── */
+    .onboarding-demo {
+      display: flex;
+      margin: 20px 0 0;
+      border-radius: 10px 10px 0 0;
+      overflow: hidden;
+      border: 2px solid #444;
+      border-bottom: none;
+      height: 110px;
+      position: relative;
+    }
+
+    .onboarding-half {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #252525;
+      position: relative;
+      gap: 5px;
+    }
+
+    #ob-left { border-right: 1px dashed #444; }
+
+    .ob-arrow {
+      font-size: 2rem;
+      color: #ff4444;
+      line-height: 1;
+    }
+
+    .ob-label {
+      font-size: 0.75rem;
+      color: #888;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .ob-tap-ring {
+      position: absolute;
+      top: calc(50% - 22px);
+      left: calc(50% - 22px);
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 68, 68, 0.8);
+      opacity: 0;
+      pointer-events: none;
+      animation: obTapRing 2s ease-out infinite;
+    }
+
+    #ob-left .ob-tap-ring  { animation-delay: 0s; }
+    #ob-right .ob-tap-ring { animation-delay: 1s; }
+
+    @keyframes obTapRing {
+      0%   { opacity: 0.9; transform: scale(0.3); }
+      80%  { opacity: 0.1; transform: scale(1.5); }
+      100% { opacity: 0;   transform: scale(1.5); }
+    }
+
+    .ob-car-row {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #252525;
+      border: 2px solid #444;
+      border-top: 1px dashed #383838;
+      border-radius: 0 0 10px 10px;
+      padding: 6px 0 8px;
+      margin-bottom: 16px;
+      font-size: 1.8rem;
+    }
+
+    .ob-divider-line {
+      display: none;
+    }
+
+    .ob-keyboard-hint {
+      font-size: 0.8rem !important;
+      color: #555 !important;
+      margin-bottom: 16px !important;
+      margin-top: -4px !important;
+    }
   </style>
 </head>
 <body>
@@ -149,6 +233,29 @@
       <p>Введите своё имя для начала игры</p>
       <input type="text" id="player-name" placeholder="Ваше имя" maxlength="50" autocomplete="off" />
       <button id="start-btn" class="overlay-btn">Начать игру</button>
+    </div>
+  </div>
+
+  <!-- Onboarding overlay -->
+  <div id="onboarding-overlay" class="overlay" style="display:none">
+    <div class="overlay-box">
+      <h1>КАК ИГРАТЬ</h1>
+      <div class="onboarding-demo">
+        <div class="onboarding-half" id="ob-left">
+          <div class="ob-arrow">◀</div>
+          <div class="ob-label">влево</div>
+          <div class="ob-tap-ring"></div>
+        </div>
+        <div class="onboarding-half" id="ob-right">
+          <div class="ob-arrow">▶</div>
+          <div class="ob-label">вправо</div>
+          <div class="ob-tap-ring"></div>
+        </div>
+      </div>
+      <div class="ob-car-row">🚗</div>
+      <p>Нажимайте на <strong style="color:#fff">левую</strong> или <strong style="color:#fff">правую</strong> часть экрана, чтобы менять полосу и объезжать машины</p>
+      <p class="ob-keyboard-hint" id="ob-keyboard-hint">На компьютере: стрелки ← →</p>
+      <button id="onboarding-btn" class="overlay-btn">Понятно!</button>
     </div>
   </div>
 
@@ -212,12 +319,32 @@
       return res.json();
     }
 
+    // ── Onboarding ────────────────────────────────────────────────────────────
+    function maybeShowOnboarding(callback) {
+      if (localStorage.getItem('drivee_onboarding_seen')) {
+        callback();
+        return;
+      }
+      const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      if (!isTouch) {
+        document.getElementById('ob-keyboard-hint').style.display = 'block';
+      } else {
+        document.getElementById('ob-keyboard-hint').style.display = 'none';
+      }
+      document.getElementById('onboarding-overlay').style.display = 'flex';
+      document.getElementById('onboarding-btn').addEventListener('click', () => {
+        localStorage.setItem('drivee_onboarding_seen', '1');
+        document.getElementById('onboarding-overlay').style.display = 'none';
+        callback();
+      }, { once: true });
+    }
+
     // ── Registration form ─────────────────────────────────────────────────────
     async function startWithPlayer(player) {
       currentPlayer = player;
       localStorage.setItem('drivee_player', JSON.stringify(player));
       document.getElementById('reg-overlay').style.display = 'none';
-      initGame();
+      maybeShowOnboarding(initGame);
     }
 
     document.getElementById('start-btn').addEventListener('click', async () => {
@@ -357,6 +484,36 @@
       playerGfx.y = GAME_HEIGHT - PLAYER_Y_OFFSET;
       playerLayer.addChild(playerGfx);
 
+      // ── Поворотники ───────────────────────────────────────────────────────────
+      let blinkerDir   = 0;    // -1 влево, 0 нет, 1 вправо
+      let blinkerTimer = 0;    // оставшееся время (сек)
+      let blinkerPhase = 0;    // счётчик фазы мигания
+      const BLINKER_DURATION = 0.5;
+      const BLINKER_PERIOD   = 0.18;
+
+      const blinkerL = new PIXI.Graphics();
+      const blinkerR = new PIXI.Graphics();
+      playerLayer.addChild(blinkerL);
+      playerLayer.addChild(blinkerR);
+
+      function redrawBlinker(gfx, lit) {
+        gfx.clear();
+        if (lit) {
+          // внешнее свечение
+          gfx.roundRect(-7, -5, 14, 10, 5).fill({ color: 0xff8800, alpha: 0.35 });
+          // сам огонь
+          gfx.roundRect(-5, -3, 10, 6, 2).fill(0xffaa00);
+          // блик
+          gfx.roundRect(-4, -2, 4, 2, 1).fill({ color: 0xffffcc, alpha: 0.7 });
+        }
+      }
+
+      function startBlinker(dir) {
+        blinkerDir   = dir;
+        blinkerTimer = BLINKER_DURATION;
+        blinkerPhase = 0;   // начинаем с «включено»
+      }
+
       // ── Сложность ─────────────────────────────────────────────────────────────
       const difficulty = {
         speed:         3,     // множитель скорости (px/s = 100 * speed)
@@ -376,6 +533,13 @@
       const H_CAR_H              = 34;  // высота горизонтальной машины
       const H_CAR_SPEED          = 320; // px/s по горизонтали
       const H_CAR_COUNT          = 1;   // машин в каждом ряду
+
+      const ENEMY_BLINK_DURATION = 0.9;   // сек мигания перед сменой полосы
+      const ENEMY_BLINK_PERIOD   = 0.17;  // период вспышки (сек)
+      const ENEMY_LANE_SPEED     = 110;   // px/s боковое движение врага
+      const ENEMY_DECIDE_MIN     = 2200;  // мин. задержка между решениями (мс)
+      const ENEMY_DECIDE_MAX     = 4500;  // макс. задержка (мс)
+      const ENEMY_LANE_START_SCORE = 15;  // с какого счёта враги меняют полосы
 
       // ── Счёт ──────────────────────────────────────────────────────────────────
       let score = 0;
@@ -407,6 +571,22 @@
         gfx.x = laneCenterX(lane);
         gfx.y = -OBJ_H / 2;
         gfx._speed = speed;
+        // состояние смены полосы
+        gfx._lane         = lane;
+        gfx._targetLane   = lane;
+        gfx._targetLaneX  = gfx.x;
+        gfx._blinkerDir   = 0;
+        gfx._blinkerTimer = 0;
+        gfx._blinkerPhase = 0;
+        gfx._laneMoving   = false;
+        gfx._nextDecide   = Date.now() + ENEMY_DECIDE_MIN + Math.random() * (ENEMY_DECIDE_MAX - ENEMY_DECIDE_MIN);
+        // поворотники врага
+        const ebl = new PIXI.Graphics();
+        const ebr = new PIXI.Graphics();
+        verticalLayer.addChild(ebl);
+        verticalLayer.addChild(ebr);
+        gfx._ebl = ebl;
+        gfx._ebr = ebr;
         verticalLayer.addChild(gfx);
         obstacles.push(gfx);
       }
@@ -466,7 +646,7 @@
         tailgaterIntervalId = setInterval(createTailgater, difficulty.spawnInterval * 1.5);
       }
 
-      restartTailgaterInterval();
+      // попутки запустятся позже, с 10-го очка
 
       // ── Перекрёстки ───────────────────────────────────────────────────────────
       const intersections = [];
@@ -535,9 +715,9 @@
         const tapX   = (e.clientX - rect.left) * scaleX;
 
         if (tapX < GAME_WIDTH / 2) {
-          playerLane = Math.max(0, playerLane - 1);
+          if (playerLane > 0) { playerLane--; startBlinker(-1); }
         } else {
-          playerLane = Math.min(LANE_COUNT - 1, playerLane + 1);
+          if (playerLane < LANE_COUNT - 1) { playerLane++; startBlinker(1); }
         }
       });
 
@@ -545,9 +725,9 @@
       window.addEventListener('keydown', (e) => {
         if (gameOver) return;
         if (e.key === 'ArrowLeft') {
-          playerLane = Math.max(0, playerLane - 1);
+          if (playerLane > 0) { playerLane--; startBlinker(-1); }
         } else if (e.key === 'ArrowRight') {
-          playerLane = Math.min(LANE_COUNT - 1, playerLane + 1);
+          if (playerLane < LANE_COUNT - 1) { playerLane++; startBlinker(1); }
         }
       });
 
@@ -598,6 +778,21 @@
         const targetX = laneCenterX(playerLane);
         playerX += (targetX - playerX) * Math.min(1, dt * 12);
         playerGfx.x = playerX;
+
+        // ── обновление поворотников ───────────────────────────────────────────
+        if (blinkerDir !== 0) {
+          blinkerTimer -= dt;
+          blinkerPhase += dt;
+          if (blinkerTimer <= 0) { blinkerDir = 0; blinkerPhase = 0; }
+        }
+        const blinkOn  = blinkerDir !== 0 && Math.floor(blinkerPhase / BLINKER_PERIOD) % 2 === 0;
+        const blinkerY = playerGfx.y - OBJ_H / 2 + 6;
+        blinkerL.x = playerGfx.x - OBJ_W / 2 + 5;
+        blinkerL.y = blinkerY;
+        blinkerR.x = playerGfx.x + OBJ_W / 2 - 5;
+        blinkerR.y = blinkerY;
+        redrawBlinker(blinkerL, blinkOn && blinkerDir === -1);
+        redrawBlinker(blinkerR, blinkOn && blinkerDir ===  1);
 
         // обновление декораций обочины
         for (let i = decorations.length - 1; i >= 0; i--) {
@@ -676,33 +871,104 @@
             }
           }
 
+          // ── смена полосы врагом (с ENEMY_LANE_START_SCORE очков) ─────────────
+          if (score >= ENEMY_LANE_START_SCORE) {
+            const now = Date.now();
+
+            // принять решение о смене полосы
+            if (!obs._laneMoving && obs._blinkerDir === 0 && now >= obs._nextDecide) {
+              const dirs = [];
+              if (obs._lane > 0)              dirs.push(-1);
+              if (obs._lane < LANE_COUNT - 1) dirs.push(1);
+              if (dirs.length > 0 && Math.random() < 0.55) {
+                const dir = dirs[Math.floor(Math.random() * dirs.length)];
+                const tl  = obs._lane + dir;
+                // проверяем: нет ли другого врага рядом в целевой полосе
+                const busy = obstacles.some(o =>
+                  o !== obs && o._lane === tl && Math.abs(o.y - obs.y) < OBJ_H * 2.5
+                );
+                if (!busy) {
+                  obs._blinkerDir   = dir;
+                  obs._blinkerTimer = ENEMY_BLINK_DURATION;
+                  obs._blinkerPhase = 0;
+                  obs._targetLane   = tl;
+                  obs._targetLaneX  = laneCenterX(tl);
+                }
+              }
+              obs._nextDecide = now + ENEMY_DECIDE_MIN + Math.random() * (ENEMY_DECIDE_MAX - ENEMY_DECIDE_MIN);
+            }
+
+            // отсчёт мигания → запуск движения
+            if (obs._blinkerDir !== 0 && !obs._laneMoving) {
+              obs._blinkerTimer -= dt;
+              obs._blinkerPhase += dt;
+              if (obs._blinkerTimer <= 0) {
+                obs._laneMoving = true;
+              }
+            }
+
+            // боковое движение к целевой полосе
+            if (obs._laneMoving) {
+              obs._blinkerPhase += dt;  // продолжаем мигать при движении
+              const diff = obs._targetLaneX - obs.x;
+              const step = Math.sign(diff) * ENEMY_LANE_SPEED * dt;
+              if (Math.abs(diff) <= Math.abs(step) + 0.5) {
+                // добрались до цели
+                obs.x           = obs._targetLaneX;
+                obs._lane       = obs._targetLane;
+                obs._laneMoving   = false;
+                obs._blinkerDir   = 0;
+                obs._blinkerPhase = 0;
+              } else {
+                const nextX = obs.x + step;
+                // столкновение с другим врагом → стоп на месте
+                const hit = obstacles.some(o =>
+                  o !== obs &&
+                  Math.abs(nextX - o.x) < OBJ_W * 0.85 &&
+                  Math.abs(obs.y  - o.y) < OBJ_H
+                );
+                if (hit) {
+                  // фиксируемся на ближайшей полосе
+                  const snapped = Math.round((obs.x - ROAD_MARGIN - LANE_WIDTH / 2) / LANE_WIDTH);
+                  obs._lane       = Math.max(0, Math.min(LANE_COUNT - 1, snapped));
+                  obs._laneMoving   = false;
+                  obs._blinkerDir   = 0;
+                  obs._blinkerPhase = 0;
+                } else {
+                  obs.x = nextX;
+                }
+              }
+            }
+
+            // отрисовка поворотников врага (фары внизу — машина едет на игрока)
+            const eBlinkOn = obs._blinkerDir !== 0 &&
+                             Math.floor(obs._blinkerPhase / ENEMY_BLINK_PERIOD) % 2 === 0;
+            const eFrontY  = obs.y + OBJ_H / 2 - 6;
+            obs._ebl.x = obs.x - OBJ_W / 2 + 5;  obs._ebl.y = eFrontY;
+            obs._ebr.x = obs.x + OBJ_W / 2 - 5;  obs._ebr.y = eFrontY;
+            redrawBlinker(obs._ebl, eBlinkOn && obs._blinkerDir === -1);
+            redrawBlinker(obs._ebr, eBlinkOn && obs._blinkerDir ===  1);
+          }
+
           // препятствие покинуло экран → +1 очко
           if (obs.y > GAME_HEIGHT + OBJ_H / 2) {
             score++;
             scoreText.text = `Счёт: ${score}`;
 
-            // каждые 10 очков — увеличиваем скорость
-            if (score % 10 === 0) {
-              difficulty.speed += SPEED_STEP;
-            }
-
-            // каждые 15 очков — уменьшаем интервал спавна
+            if (score === 10) restartTailgaterInterval();
+            if (score % 10 === 0) difficulty.speed += SPEED_STEP;
             if (score % 15 === 0) {
               const next = difficulty.spawnInterval - SPAWN_STEP;
               difficulty.spawnInterval = Math.max(SPAWN_INTERVAL_MIN, next);
               restartSpawnInterval();
             }
-
-            // каждые 20 очков — добавляем машину в волну
             if (score % CARS_STEP_SCORE === 0) {
               difficulty.carsPerWave = Math.min(CARS_MAX, difficulty.carsPerWave + 1);
             }
+            if (score % INTERSECTION_TRIGGER === 0) spawnIntersection();
 
-            // каждые 25 очков — перекрёсток
-            if (score % INTERSECTION_TRIGGER === 0) {
-              spawnIntersection();
-            }
-
+            obs._ebl.destroy();
+            obs._ebr.destroy();
             verticalLayer.removeChild(obs);
             obs.destroy();
             obstacles.splice(i, 1);
