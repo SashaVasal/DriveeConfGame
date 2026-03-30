@@ -9,6 +9,7 @@ FROM alpine:latest
 WORKDIR /app
 COPY --from=builder /app/server .
 COPY index.html .
+COPY pixi.min.js .
 COPY sprites/ ./sprites/
 
 EXPOSE 3000
