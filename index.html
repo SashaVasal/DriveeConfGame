@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Drivee Game</title>
-  <script src="https://cdn.jsdelivr.net/npm/pixi.js@8/dist/pixi.min.js"></script>
+  <script src="/pixi.min.js"></script>
   <style>
     * {
       margin: 0;
@@ -166,7 +166,7 @@
   <div id="game-container"></div>
 
   <script>
-    const SPRITE_PLAYER  = '/sprites/car-player.png';
+    const SPRITE_PLAYER  = '/sprites/car-player-green.png';
     const SPRITE_ENEMY   = '/sprites/car-enemy.png';
     const SPRITE_FRIENDLY = '/sprites/car-friendly.png';
     const SPRITE_CROSS   = '/sprites/car-cross.png';
@@ -176,9 +176,9 @@
     const GAME_WIDTH  = 360;
     const GAME_HEIGHT = 600;
 
-    const LANE_COUNT       = 4;
+    const LANE_COUNT       = 5;
     const ROAD_MARGIN      = 30;
-    const LANE_WIDTH       = (GAME_WIDTH - ROAD_MARGIN * 2) / LANE_COUNT;  // 75px
+    const LANE_WIDTH       = (GAME_WIDTH - ROAD_MARGIN * 2) / LANE_COUNT;  // 60px
     const OBJ_W            = 40;
     const OBJ_H            = 60;
     const PLAYER_Y_OFFSET  = 200;   // отступ от низа
@@ -351,7 +351,7 @@
       setInterval(() => { spawnDecoration(); spawnDecoration(); }, 700);
 
       // ── Игрок ─────────────────────────────────────────────────────────────────
-      let playerLane = 1;   // стартовая полоса (0-3)
+      let playerLane = 2;   // стартовая полоса (0-4)
       const playerGfx = makeCarSprite('car-player', OBJ_W, OBJ_H);
       playerGfx.x = laneCenterX(playerLane);
       playerGfx.y = GAME_HEIGHT - PLAYER_Y_OFFSET;
@@ -416,13 +416,14 @@
       }
 
       function spawnWave() {
+        if (obstacles.length >= 3) return;
         // выбираем случайные уникальные полосы для волны,
         // исключая полосы с активными попутками и встречными
         const busyLanes = new Set([
           ...tailgaters.map(laneOf),
           ...obstacles.map(laneOf),
         ]);
-        const count = difficulty.carsPerWave;
+        const count = Math.min(difficulty.carsPerWave, 3 - obstacles.length);
         const lanes = Array.from({ length: LANE_COUNT }, (_, i) => i)
           .filter(l => !busyLanes.has(l));
         for (let i = lanes.length - 1; i > 0; i--) {
