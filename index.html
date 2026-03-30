@@ -627,7 +627,7 @@
         if (freeLanes.length === 0) return;
 
         const lane = freeLanes[Math.floor(Math.random() * freeLanes.length)];
-        const speed = difficulty.speed * 100 + 15 + Math.random() * 15;
+        const speed = difficulty.speed * 65 + 10 + Math.random() * 10;
 
         // попутки едут вверх (как игрок) → спрайт без поворота
         const gfx = makeCarSprite('car-friendly', OBJ_W, OBJ_H);
