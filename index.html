@@ -118,6 +118,12 @@
     .overlay-btn:hover { background: #e03333; }
     .overlay-btn:disabled { background: #666; cursor: default; }
 
+    .overlay-btn-secondary {
+      background: #333;
+      margin-top: 8px;
+    }
+    .overlay-btn-secondary:hover { background: #444; }
+
     #lb-list {
       list-style: none;
       padding: 0;
@@ -267,6 +273,7 @@
       <h3>Таблица лидеров</h3>
       <ol id="lb-list"></ol>
       <button id="restart-btn" class="overlay-btn">Играть снова</button>
+      <button id="new-user-btn" class="overlay-btn overlay-btn-secondary">Новый пользователь</button>
     </div>
   </div>
 
@@ -362,6 +369,12 @@
     });
 
     document.getElementById('restart-btn').addEventListener('click', () => {
+      location.reload();
+    });
+
+    document.getElementById('new-user-btn').addEventListener('click', () => {
+      localStorage.removeItem('drivee_player');
+      localStorage.removeItem('drivee_onboarding_seen');
       location.reload();
     });
 
